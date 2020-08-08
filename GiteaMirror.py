@@ -12,7 +12,6 @@ gitea_token = ""
 github_token = ""
 
 
-
 class Gitea(object):
 
     def __init__(self):
@@ -45,6 +44,19 @@ class Gitea(object):
             if r.status_code == 422:
                 return
             print(r.status_code, r.text, jsonstring)
+
+    def list_org(self, name):
+        r = self.session.get("{0}/orgs/{1}/repos".format(gitea_url, name))
+        if r.status_code != 200:
+            print("Cannot list organization", file=sys.sterr)
+            exit(1)
+        repo_list = json.loads(r.text)
+        return repo_list
+
+    def delete_repo(self, owner, name):
+        r = self.session.delete("{0}/repos/{1}/{2}".format(gitea_url, owner, name))
+        if r.status_code != 204:
+            print(r.status_code, r.text, "{0}/{1}".format(owner, name))
 
     def migrate(self, name, description, clone_url, gitea_uid):
         m = {
@@ -129,8 +141,11 @@ def mirror_gitlab_org(gitlab_url, organization, name=None):
     uid = gitea.get_org(name)
 
     for repo in org.projects.list(all=True):
-        print(repo.name)
-        gitea.migrate(repo.name, repo.description, repo.http_url_to_repo, uid)
+        name = repo.name
+        if " " in name:
+            name = repo.path
+        print(name)
+        gitea.migrate(name, repo.description, repo.http_url_to_repo, uid)
 
 
 def mirror_gitlab_user(gitlab_url, user, name=None):
@@ -153,6 +168,12 @@ def mirror_gitlab_user(gitlab_url, user, name=None):
         print(repo)
         gitea.migrate(repo.name, repo.description, repo.http_url_to_repo, uid)
 
+def purge_org(org):
+    gitea = Gitea()
+    repo_list = gitea.list_org(org)
+    for repo in repo_list:
+        print(repo["name"])
+        gitea.delete_repo(org, repo["name"])
 
 def build_parser():
     # Base
@@ -184,6 +205,9 @@ def build_parser():
 
         type_parser.add_argument('--name', required=False)
 
+    mode_parser = mode_group.add_parser("purge")
+    mode_parser.add_argument("name")
+
     return parser
 
 
@@ -201,6 +225,8 @@ def main(argv):
             mirror_gitlab_user(args.gitlab_url, args.gitlab_path, args.name)
         if args.type == "group":
             mirror_gitlab_org(args.gitlab_url, args.gitlab_path, args.name)
+    if args.mode == "purge":
+        purge_org(args.name)
 
 
 if __name__ == '__main__':
